@@ -1,0 +1,67 @@
+[build-system]
+requires = [
+    "setuptools>=64",
+    "wheel",
+    "numpy>=1.17",
+    "torch>=2.0",
+]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "turbojpeg-torch"
+# Version is set dynamically in setup.py based on torch version (e.g., 1.8.2+torch2.5)
+dynamic = ["version"]
+description = "Python interface for libjpeg-turbo with PyTorch support. Fast JPEG encode/decode with CPU acceleration."
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.8"
+authors = [
+    { name = "Lilo Huang", email = "kuso.cc@gmail.com" },
+]
+keywords = [
+    "turbojpeg-torch",
+    "turbojpeg",
+    "libjpeg-turbo",
+    "pytorch",
+    "torch",
+    "jpeg",
+    "jpg",
+    "encode",
+    "decode",
+    "cpu",
+    "fast",
+    "hardware acceleration",
+]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Operating System :: POSIX :: Linux",
+    "Operating System :: MacOS",
+    "Operating System :: Microsoft :: Windows",
+    "Topic :: Multimedia :: Graphics :: Graphics Conversion",
+]
+dependencies = [
+    "numpy>=1.17",
+    "torch>=2.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/lilohuang/PyTurboJPEG"
+Repository = "https://github.com/lilohuang/PyTurboJPEG"
+Issues = "https://github.com/lilohuang/PyTurboJPEG/issues"
+
+[tool.setuptools]
+include-package-data = true
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["turbojpeg", "turbojpeg_libs*"]
+
+[tool.setuptools.package-data]
+"turbojpeg_libs" = ["*.so*", "*.dylib", "*.dll"]
+

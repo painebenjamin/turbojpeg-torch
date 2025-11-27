@@ -1,0 +1,15 @@
+include README.md
+include LICENSE
+include Makefile
+include pyproject.toml
+include bundle_libs.py
+
+recursive-include turbojpeg *.py
+
+global-exclude *.pyc
+global-exclude __pycache__
+global-exclude *.so
+global-exclude *.dylib
+global-exclude *.dll
+global-exclude .git*
+

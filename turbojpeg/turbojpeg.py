@@ -1,8 +1,10 @@
 # -*- coding: UTF-8 -*-
 #
-# PyTurboJPEG - A Python wrapper of libjpeg-turbo for decoding and encoding JPEG image.
+# PyTurboJPEG-Torch - A Python wrapper of libjpeg-turbo for decoding and encoding JPEG image.
+# Modified to support PyTorch tensors directly.
 #
 # Copyright (c) 2018-2025, Lilo Huang. All rights reserved.
+# Torch modifications copyright (c) 2025.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -29,10 +31,33 @@ from ctypes import *
 from ctypes.util import find_library
 import platform
 import numpy as np
+import torch
 import math
 import warnings
 import os
+from pathlib import Path
 from struct import unpack, calcsize
+
+
+def _get_bundled_lib_path():
+    """Get path to bundled libturbojpeg if available."""
+    package_dir = Path(__file__).parent.parent
+    libs_dir = package_dir / "turbojpeg_libs"
+    
+    if platform.system() == "Darwin":
+        lib_name = "libturbojpeg.dylib"
+    elif platform.system() == "Linux":
+        lib_name = "libturbojpeg.so.0"
+    elif platform.system() == "Windows":
+        lib_name = "turbojpeg.dll"
+    else:
+        return None
+    
+    lib_path = libs_dir / lib_name
+    if lib_path.exists():
+        return str(lib_path)
+    return None
+
 
 # default libTurboJPEG library path
 DEFAULT_LIB_PATHS = {
@@ -295,7 +320,10 @@ def split_byte_into_nibbles(value):
 
 
 class TurboJPEG(object):
-    """A Python wrapper of libjpeg-turbo for decoding and encoding JPEG image."""
+    """A Python wrapper of libjpeg-turbo for decoding and encoding JPEG image.
+    
+    Supports both numpy arrays and PyTorch tensors for decode/encode operations.
+    """
     def __init__(self, lib_path=None):
         turbo_jpeg = cdll.LoadLibrary(
             self.__find_turbojpeg() if lib_path is None else lib_path)
@@ -408,28 +436,74 @@ class TurboJPEG(object):
         finally:
             self.__destroy(handle)
 
-    def decode(self, jpeg_buf, pixel_format=TJPF_BGR, scaling_factor=None, flags=0, dst=None):
-        """decodes JPEG memory buffer to numpy array."""
+    def decode(self, jpeg_buf, pixel_format=TJPF_BGR, scaling_factor=None, flags=0, dst=None, as_tensor=True):
+        """Decodes JPEG memory buffer to numpy array or PyTorch tensor.
+        
+        Parameters
+        ----------
+        jpeg_buf : bytes
+            JPEG image data as bytes.
+        pixel_format : int
+            Output pixel format (TJPF_BGR, TJPF_RGB, etc.). Default: TJPF_BGR.
+        scaling_factor : tuple, optional
+            Scaling factor as (num, denom) tuple. Default: None (no scaling).
+        flags : int
+            Decoding flags. Default: 0.
+        dst : ndarray or Tensor, optional
+            Pre-allocated destination buffer. Default: None (allocate new).
+        as_tensor : bool
+            If True, return PyTorch tensor. If False, return numpy array. Default: True.
+            
+        Returns
+        -------
+        torch.Tensor or numpy.ndarray
+            Decoded image as HWC tensor/array with dtype uint8.
+        """
         handle = self.__init_decompress()
         try:
             jpeg_array = np.frombuffer(jpeg_buf, dtype=np.uint8)
             src_addr = self.__getaddr(jpeg_array)
             scaled_width, scaled_height, _, _ = \
                 self.__get_header_and_dimensions(handle, jpeg_array.size, src_addr, scaling_factor)
-            if ((type(dst) == np.ndarray) and
-                (dst.shape == (scaled_height, scaled_width, tjPixelSize[pixel_format])) and
-                (dst.dtype == np.uint8)):
-                img_array = dst
+            
+            # Handle pre-allocated destination buffer
+            if dst is not None:
+                if isinstance(dst, torch.Tensor):
+                    # Convert tensor to numpy for decoding
+                    if not dst.is_contiguous():
+                        raise ValueError("Destination tensor must be contiguous")
+                    if dst.dtype != torch.uint8:
+                        raise ValueError("Destination tensor must have dtype uint8")
+                    if dst.shape != (scaled_height, scaled_width, tjPixelSize[pixel_format]):
+                        raise ValueError(f"Destination tensor shape mismatch: expected {(scaled_height, scaled_width, tjPixelSize[pixel_format])}, got {tuple(dst.shape)}")
+                    img_array = dst.numpy()
+                elif isinstance(dst, np.ndarray):
+                    if dst.shape == (scaled_height, scaled_width, tjPixelSize[pixel_format]) and dst.dtype == np.uint8:
+                        img_array = dst
+                    else:
+                        img_array = np.empty(
+                            [scaled_height, scaled_width, tjPixelSize[pixel_format]],
+                            dtype=np.uint8)
+                else:
+                    raise TypeError("dst must be numpy.ndarray or torch.Tensor")
             else:
                 img_array = np.empty(
                     [scaled_height, scaled_width, tjPixelSize[pixel_format]],
                     dtype=np.uint8)
+            
             dest_addr = self.__getaddr(img_array)
             status = self.__decompress(
                 handle, src_addr, jpeg_array.size, dest_addr, scaled_width,
                 0, scaled_height, pixel_format, flags)
             if status != 0:
                 self.__report_error(handle)
+            
+            if as_tensor:
+                # If dst was a tensor, the data is already there
+                if isinstance(dst, torch.Tensor):
+                    return dst
+                # Convert numpy array to torch tensor (shares memory when possible)
+                return torch.from_numpy(img_array)
             return img_array
         finally:
             self.__destroy(handle)
@@ -492,9 +566,36 @@ class TurboJPEG(object):
             self.__destroy(handle)
 
     def encode(self, img_array, quality=85, pixel_format=TJPF_BGR, jpeg_subsample=TJSAMP_422, flags=0, dst=None):
-        """encodes numpy array to JPEG memory buffer."""
+        """Encodes numpy array or PyTorch tensor to JPEG memory buffer.
+        
+        Parameters
+        ----------
+        img_array : numpy.ndarray or torch.Tensor
+            Input image as HWC array/tensor with dtype uint8.
+        quality : int
+            JPEG quality (1-100). Default: 85.
+        pixel_format : int
+            Input pixel format (TJPF_BGR, TJPF_RGB, etc.). Default: TJPF_BGR.
+        jpeg_subsample : int
+            Chrominance subsampling. Default: TJSAMP_422.
+        flags : int
+            Encoding flags. Default: 0.
+        dst : buffer, optional
+            Pre-allocated destination buffer. Default: None.
+            
+        Returns
+        -------
+        bytes
+            JPEG encoded image data.
+        """
         handle = self.__init_compress()
         try:
+            # Handle PyTorch tensor input
+            if isinstance(img_array, torch.Tensor):
+                if not img_array.is_contiguous():
+                    img_array = img_array.contiguous()
+                img_array = img_array.numpy()
+            
             img_array = np.ascontiguousarray(img_array)
             if dst is not None and not self.__is_buffer(dst):
                 raise TypeError('\'dst\' argument must support buffer protocol')
@@ -530,6 +631,12 @@ class TurboJPEG(object):
         """encodes numpy array to JPEG memory buffer."""
         handle = self.__init_compress()
         try:
+            # Handle PyTorch tensor input
+            if isinstance(img_array, torch.Tensor):
+                if not img_array.is_contiguous():
+                    img_array = img_array.contiguous()
+                img_array = img_array.numpy()
+            
             jpeg_buf = c_void_p()
             jpeg_size = c_ulong()
             img_array = np.ascontiguousarray(img_array)
@@ -698,6 +805,9 @@ class TurboJPEG(object):
 
     def buffer_size(self, img_array, jpeg_subsample=TJSAMP_422):
         """Get maximum number of bytes of compressed jpeg data"""
+        # Handle PyTorch tensor input
+        if isinstance(img_array, torch.Tensor):
+            img_array = img_array.numpy()
         img_array = np.ascontiguousarray(img_array)
         height, width = img_array.shape[:2]
         return self.__buffer_size(width, height, jpeg_subsample)
@@ -981,10 +1091,16 @@ class TurboJPEG(object):
 
     def __find_turbojpeg(self):
         """returns default turbojpeg library path if possible"""
+        # First, check for bundled library
+        bundled_path = _get_bundled_lib_path()
+        if bundled_path is not None:
+            return bundled_path
+        
+        # Then try system library
         lib_path = find_library('turbojpeg')
         if lib_path is not None:
             return lib_path
-        for lib_path in DEFAULT_LIB_PATHS[platform.system()]:
+        for lib_path in DEFAULT_LIB_PATHS.get(platform.system(), []):
             if os.path.exists(lib_path):
                 return lib_path
         if platform.system() == 'Linux' and 'LD_LIBRARY_PATH' in os.environ:
@@ -1014,14 +1130,3 @@ class TurboJPEG(object):
     def scaling_factors(self):
         return self.__scaling_factors
 
-if __name__ == '__main__':
-    jpeg = TurboJPEG()
-    in_file = open('input.jpg', 'rb')
-    img_array = jpeg.decode(in_file.read())
-    in_file.close()
-    out_file = open('output.jpg', 'wb')
-    out_file.write(jpeg.encode(img_array))
-    out_file.close()
-    import cv2
-    cv2.imshow('image', img_array)
-    cv2.waitKey(0)
