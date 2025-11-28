@@ -9,12 +9,64 @@ so the package is self-contained and doesn't require system-level installation.
 import argparse
 import os
 import platform
+import re
 import shutil
+import struct
 import subprocess
 import sys
 import tempfile
 from pathlib import Path
 from zipfile import ZipFile
+
+
+def get_platform_tag():
+    """Get the appropriate platform tag for the wheel."""
+    system = platform.system()
+    machine = platform.machine()
+    
+    if system == "Linux":
+        # Map machine architecture to manylinux tag
+        arch_map = {
+            "x86_64": "x86_64",
+            "aarch64": "aarch64",
+            "armv7l": "armv7l",
+            "i686": "i686",
+        }
+        arch = arch_map.get(machine, machine)
+        # Use manylinux_2_17 for broad compatibility
+        return f"manylinux_2_17_{arch}"
+    elif system == "Darwin":
+        # macOS - detect if ARM or Intel
+        if machine == "arm64":
+            return "macosx_11_0_arm64"
+        else:
+            return "macosx_10_9_x86_64"
+    elif system == "Windows":
+        if struct.calcsize("P") * 8 == 64:
+            return "win_amd64"
+        else:
+            return "win32"
+    else:
+        return "any"
+
+
+def rename_wheel_with_platform(wheel_path: Path, platform_tag: str) -> Path:
+    """Rename a wheel file with the correct platform tag."""
+    # Parse wheel filename: {distribution}-{version}(-{build})?-{python}-{abi}-{platform}.whl
+    wheel_name = wheel_path.stem
+    parts = wheel_name.split("-")
+    
+    if len(parts) >= 5:
+        # Standard wheel name format
+        # Replace the platform part (last element)
+        parts[-1] = platform_tag
+        new_name = "-".join(parts) + ".whl"
+    else:
+        # Fallback - append platform tag
+        new_name = wheel_name.replace("-any", f"-{platform_tag}") + ".whl"
+    
+    new_path = wheel_path.parent / new_name
+    return new_path
 
 
 def get_turbojpeg_lib_path():
@@ -166,6 +218,30 @@ def bundle_wheel(wheel_path: str, output_dir: str = None) -> str:
                 if not lib_file.is_symlink():
                     patch_rpath(lib_file, "$ORIGIN")
 
+        # Get platform tag for bundled wheel
+        platform_tag = get_platform_tag()
+        print(f"Platform tag: {platform_tag}")
+
+        # Update WHEEL metadata file with correct platform tag
+        wheel_files = list(extract_dir.glob("*.dist-info/WHEEL"))
+        if wheel_files:
+            wheel_file = wheel_files[0]
+            with open(wheel_file, "r") as f:
+                wheel_content = f.read()
+            
+            # Replace the Tag line(s) with the correct platform
+            # Original: Tag: py3-none-any
+            # New: Tag: py3-none-{platform_tag}
+            wheel_content = re.sub(
+                r"Tag: (py\d+|cp\d+)-(\w+)-\w+",
+                rf"Tag: \1-\2-{platform_tag}",
+                wheel_content
+            )
+            
+            with open(wheel_file, "w") as f:
+                f.write(wheel_content)
+            print(f"Updated WHEEL metadata with platform tag")
+
         # Update RECORD file
         record_files = list(extract_dir.glob("*.dist-info/RECORD"))
         if record_files:
@@ -175,8 +251,9 @@ def bundle_wheel(wheel_path: str, output_dir: str = None) -> str:
                     rel_path = lib_file.relative_to(extract_dir)
                     f.write(f"{rel_path},,\n")
 
-        # Repack wheel
-        output_wheel = output_dir / wheel_path.name
+        # Determine output wheel name with correct platform tag
+        output_wheel = rename_wheel_with_platform(wheel_path, platform_tag)
+        output_wheel = output_dir / output_wheel.name
 
         print(f"Creating bundled wheel: {output_wheel}")
         with ZipFile(output_wheel, "w") as zf:
@@ -184,6 +261,12 @@ def bundle_wheel(wheel_path: str, output_dir: str = None) -> str:
                 if file_path.is_file() or file_path.is_symlink():
                     arcname = file_path.relative_to(extract_dir)
                     zf.write(file_path, arcname)
+
+        # Remove the original any-platform wheel if it exists and is different
+        original_any_wheel = output_dir / wheel_path.name
+        if original_any_wheel.exists() and original_any_wheel != output_wheel:
+            original_any_wheel.unlink()
+            print(f"Removed original wheel: {wheel_path.name}")
 
         return str(output_wheel)
 

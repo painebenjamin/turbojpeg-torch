@@ -224,4 +224,4 @@ Compared to PIL/Pillow and OpenCV:
 
 MIT License - see LICENSE file for details.
 
-Based on [PyTurboJPEG](https://github.com/lilohuang/PyTurboJPEG) by Lilo Huang.
+Based on [PyTurboJPEG](https://github.com/lilohuang/PyTurboJPEG) by Lilo Huang, with PyTorch support added by Benjamin Paine.

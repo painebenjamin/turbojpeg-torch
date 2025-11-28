@@ -4,7 +4,7 @@
 # Modified to support PyTorch tensors directly.
 #
 # Copyright (c) 2018-2025, Lilo Huang. All rights reserved.
-# Torch modifications copyright (c) 2025.
+# Torch modifications copyright (c) 2025, Benjamin Paine.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -24,7 +24,7 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-__author__ = 'Lilo Huang <kuso.cc@gmail.com>'
+__author__ = 'Lilo Huang <kuso.cc@gmail.com>, Benjamin Paine <painebenjamin@gmail.com>'
 __version__ = '1.8.2'
 
 from ctypes import *

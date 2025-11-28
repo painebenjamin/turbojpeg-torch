@@ -9,7 +9,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "turbojpeg-torch"
-# Version is set dynamically in setup.py based on torch version (e.g., 1.8.2+torch2.5)
+# Version is set dynamically in setup.py
 dynamic = ["version"]
 description = "Python interface for libjpeg-turbo with PyTorch support. Fast JPEG encode/decode with CPU acceleration."
 readme = "README.md"
@@ -17,6 +17,7 @@ license = "MIT"
 requires-python = ">=3.8"
 authors = [
     { name = "Lilo Huang", email = "kuso.cc@gmail.com" },
+    { name = "Benjamin Paine", email = "painebenjamin@gmail.com" },
 ]
 keywords = [
     "turbojpeg-torch",
